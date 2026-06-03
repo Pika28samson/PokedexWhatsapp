@@ -103,7 +103,7 @@ app.post('/webhook', async (req, res) => {
                 // ----------------------------------------------------
                 // MODE: EVOLUTIONS
                 // ----------------------------------------------------
-                if (mode === 'evos') {
+                if (mode === 'evo') {
                     const speciesRes = await axios.get(`https://pokeapi.co/api/v2/pokemon-species/${pokemonName}`);
                     const chainUrl = speciesRes.data.evolution_chain.url;
                     const chainRes = await axios.get(chainUrl);
@@ -199,8 +199,7 @@ app.post('/webhook', async (req, res) => {
                                     `• *Type:* ${types}\n` +
                                     `• *Height:* ${pkm.height / 10} m\n` +
                                     `• *Weight:* ${pkm.weight / 10} kg\n\n` +
-                                    `*Description:*\n${textDescription}\n\n` +
-                                    `Need an override? Is it the wrong Pokemon? (Showing: ${pkm.name})`;
+                                    `*Description:*\n${textDescription}\n\n`;
 
                     await sendImage(fromNumber, imageUrl, caption);
                 }
