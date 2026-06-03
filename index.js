@@ -21,12 +21,43 @@ const GEN_MAP = {
     '9': ['scarlet-violet']
 };
 
+const VERSION_PRIORITY = [
+    'scarlet-violet',
+    'legends-arceus',
+    'brilliant-diamond-shining-pearl',
+    'sword-shield',
+    'ultra-sun-ultra-moon',
+    'sun-moon',
+    'omega-ruby-alpha-sapphire',
+    'x-y',
+    'black-2-white-2',
+    'black-white',
+    'heartgold-soulsilver',
+    'platinum',
+    'diamond-pearl',
+    'firered-leafgreen',
+    'emerald',
+    'ruby-sapphire',
+    'crystal',
+    'gold-silver',
+    'yellow',
+    'red-blue'
+];
+
 const REGIONAL_FORMS = {
     'a-': 'alola',
     'g-': 'galar',
     'h-': 'hisui',
     'p-': 'paldea'
 };
+
+function getBaseSpeciesName(name) {
+    return name
+        .replace('-alola', '')
+        .replace('-galar', '')
+        .replace('-hisui', '')
+        .replace('-paldea', '');
+}
 
 function normalizePokemonName(name) {
     for (const [prefix, region] of Object.entries(REGIONAL_FORMS)) {
@@ -120,11 +151,16 @@ app.post('/webhook', async (req, res) => {
                 // MODE: EVOLUTIONS
                 // ----------------------------------------------------
                 if (mode === 'evo') {
-                    const speciesRes = await axios.get(`https://pokeapi.co/api/v2/pokemon-species/${pokemonName}`);
+                    const speciesRes = await axios.get(
+                        `https://pokeapi.co/api/v2/pokemon-species/${getBaseSpeciesName(pokemonName)}`
+                    );
                     const chainUrl = speciesRes.data.evolution_chain.url;
                     const chainRes = await axios.get(chainUrl);
                     
-                    const paths = buildEvoPaths(chainRes.data.chain, pokemonName);
+                    const paths = buildEvoPaths(
+                        chainRes.data.chain,
+                        getBaseSpeciesName(pokemonName)
+                    );
                     const formattedMessage = `*Evolution Line for ${cleanName(pokemonName)}:*\n\n` + paths.join('\n');
                     
                     await sendText(fromNumber, formattedMessage);
@@ -140,31 +176,58 @@ app.post('/webhook', async (req, res) => {
                     let targetGroups = [];
                     let genTitle = "Latest Gen";
 
-                    // Default to newest generation if none specified
-                    if (!genInput) {
-                        const latestGen = Object.keys(GEN_MAP)
-                            .map(Number)
-                            .sort((a, b) => b - a)[0];
+                    if (genInput && GEN_MAP[genInput]) {
 
-                        targetGroups = GEN_MAP[latestGen.toString()];
-                        genTitle = `Gen ${latestGen}`;
-                    }
-                    else if (GEN_MAP[genInput]) {
                         targetGroups = GEN_MAP[genInput];
                         genTitle = `Gen ${genInput}`;
+
+                    } else {
+
+                        let newestVersion = null;
+
+                        for (const version of VERSION_PRIORITY) {
+
+                            const found = movesData.some(move =>
+                                move.version_group_details.some(
+                                    vg => vg.version_group.name === version
+                                )
+                            );
+
+                            if (found) {
+                                newestVersion = version;
+                                break;
+                            }
+                        }
+
+                        if (newestVersion) {
+
+                            targetGroups = [newestVersion];
+
+                            for (const [gen, groups] of Object.entries(GEN_MAP)) {
+                                if (groups.includes(newestVersion)) {
+                                    genTitle = `Gen ${gen}`;
+                                    break;
+                                }
+                            }
+                        }
                     }
 
                     let learnset = [];
-                    movesData.forEach(m => {
-                        m.version_group_details.forEach(vg => {
-                            const matchGroup = targetGroups.length === 0 || targetGroups.includes(vg.version_group.name);
-                            if (matchGroup && vg.move_learn_method.name === 'level-up') {
-                                learnset.push({
-                                    level: vg.level_learned_at,
-                                    name: cleanName(m.move.name)
-                                });
-                            }
+
+                    movesData.forEach(move => {
+
+                        const validEntry = move.version_group_details.find(vg =>
+                            targetGroups.includes(vg.version_group.name) &&
+                            vg.move_learn_method.name === 'level-up'
+                        );
+
+                        if (!validEntry) return;
+
+                        learnset.push({
+                            level: validEntry.level_learned_at,
+                            name: cleanName(move.move.name)
                         });
+
                     });
 
                     // Deduplicate and sort moves ascending by level
@@ -178,6 +241,24 @@ app.post('/webhook', async (req, res) => {
                         }
                     }
                     uniqueMoves.sort((a, b) => a.level - b.level);
+
+                    if (
+                        pokemonName.endsWith('-alola') ||
+                        pokemonName.endsWith('-galar') ||
+                        pokemonName.endsWith('-hisui') ||
+                        pokemonName.endsWith('-paldea')
+                    ) {
+                        const highLevelMoves = uniqueMoves.filter(m => m.level > 1);
+
+                        // Only strip Lv.1 moves if there are actually higher-level moves
+                        if (highLevelMoves.length >= 5) {
+                            uniqueMoves.splice(
+                                0,
+                                uniqueMoves.length,
+                                ...highLevelMoves
+                            );
+                        }
+                    }
 
                     if (uniqueMoves.length === 0) {
                         await sendText(fromNumber, `No level-up moves found for ${cleanName(pokemonName)} in ${genTitle}.`);
@@ -197,7 +278,9 @@ app.post('/webhook', async (req, res) => {
                 // ----------------------------------------------------
                 else {
                     const pkmRes = await axios.get(`https://pokeapi.co/api/v2/pokemon/${pokemonName}`);
-                    const speciesRes = await axios.get(`https://pokeapi.co/api/v2/pokemon-species/${pokemonName}`);
+                    const speciesRes = await axios.get(
+                        `https://pokeapi.co/api/v2/pokemon-species/${getBaseSpeciesName(pokemonName)}`
+                    );
                     
                     const pkm = pkmRes.data;
                     const species = speciesRes.data;
@@ -213,7 +296,15 @@ app.post('/webhook', async (req, res) => {
                     const idString = pkm.id.toString().padStart(4, '0');
                     const types = pkm.types.map(t => cleanName(t.type.name)).join(' / ');
 
-                    const caption = `*No. ${idString}* | *${pkm.name.toUpperCase()}*\n` +
+                    const displayName = cleanName(
+                        pkm.name
+                            .replace('-alola', ' (Alolan)')
+                            .replace('-galar', ' (Galarian)')
+                            .replace('-hisui', ' (Hisuian)')
+                            .replace('-paldea', ' (Paldean)')
+                    );
+
+                    const caption = `*No. ${idString}* | *${displayName.toUpperCase()}*\n` +
                                     `_${category}_\n\n` +
                                     `• *Type:* ${types}\n` +
                                     `• *Height:* ${pkm.height / 10} m\n` +
