@@ -21,6 +21,22 @@ const GEN_MAP = {
     '9': ['scarlet-violet']
 };
 
+const REGIONAL_FORMS = {
+    'a-': 'alola',
+    'g-': 'galar',
+    'h-': 'hisui',
+    'p-': 'paldea'
+};
+
+function normalizePokemonName(name) {
+    for (const [prefix, region] of Object.entries(REGIONAL_FORMS)) {
+        if (name.startsWith(prefix)) {
+            return `${name.slice(prefix.length)}-${region}`;
+        }
+    }
+    return name;
+}
+
 // Helper function to make strings look pristine
 function cleanName(str) {
     return str.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
@@ -95,7 +111,7 @@ app.post('/webhook', async (req, res) => {
         // Match any incoming message starting with '!'
         if (incomingText.startsWith('!')) {
             const parts = incomingText.slice(1).split(/\s+/);
-            const pokemonName = parts[0].toLowerCase();
+            const pokemonName = normalizePokemonName(parts[0].toLowerCase());
             const mode = parts[1]?.toLowerCase();
             const genInput = parts[2];
 
@@ -123,8 +139,17 @@ app.post('/webhook', async (req, res) => {
                     
                     let targetGroups = [];
                     let genTitle = "Latest Gen";
-                    
-                    if (genInput && GEN_MAP[genInput]) {
+
+                    // Default to newest generation if none specified
+                    if (!genInput) {
+                        const latestGen = Object.keys(GEN_MAP)
+                            .map(Number)
+                            .sort((a, b) => b - a)[0];
+
+                        targetGroups = GEN_MAP[latestGen.toString()];
+                        genTitle = `Gen ${latestGen}`;
+                    }
+                    else if (GEN_MAP[genInput]) {
                         targetGroups = GEN_MAP[genInput];
                         genTitle = `Gen ${genInput}`;
                     }
@@ -141,12 +166,6 @@ app.post('/webhook', async (req, res) => {
                             }
                         });
                     });
-
-                    // If user didn't specify a gen, isolate the moves to the highest gen available
-                    if (targetGroups.length === 0 && learnset.length > 0) {
-                        const maxLevel = Math.max(...learnset.map(l => l.level));
-                        // Deduplicate entries keeping logical order
-                    }
 
                     // Deduplicate and sort moves ascending by level
                     const uniqueMoves = [];
