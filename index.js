@@ -8,7 +8,72 @@ app.use(express.json());
 const TOKEN = 'EAAOZBMSeaZAGEBRjQ9iUvYktGu2eHm7Btt0q4WTVRDFn4WuR1co5i9GU1KrS0CkuOGGhdOxAfjhz3WF8cAr5e4foWl3kr4IBcnhL5VaRWeJPvrwIr7D0dgaE2lerCDaRiRQxwrQ6I4Db2sl4aJZC7VxMUfZCFV12iD7OylkxcRB1FhC3jvjXiWRt5EqcfwZDZD';
 const PHONE_NUMBER_ID = '1114413501761892';
 
-// Meta requires a webhook verification step when you first connect it
+// Map generations to PokéAPI version groups
+const GEN_MAP = {
+    '1': ['red-blue', 'yellow'],
+    '2': ['gold-silver', 'crystal'],
+    '3': ['ruby-sapphire', 'emerald', 'firered-leafgreen'],
+    '4': ['diamond-pearl', 'platinum', 'heartgold-soulsilver'],
+    '5': ['black-white', 'black-2-white-2'],
+    '6': ['x-y', 'omega-ruby-alpha-sapphire'],
+    '7': ['sun-moon', 'ultra-sun-ultra-moon'],
+    '8': ['sword-shield', 'brilliant-diamond-shining-pearl', 'legends-arceus'],
+    '9': ['scarlet-violet']
+};
+
+// Helper function to make strings look pristine
+function cleanName(str) {
+    return str.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+}
+
+// Helper to parse complex evolution methods cleanly
+function getEvoDetails(details) {
+    if (!details || details.length === 0) return '--> ';
+    const d = details[0];
+    let triggers = [];
+
+    if (d.min_level) triggers.push(`Lvl ${d.min_level}`);
+    if (d.item) triggers.push(cleanName(d.item.name));
+    if (d.held_item) triggers.push(`holding ${cleanName(d.held_item.name)}`);
+    if (d.location) triggers.push(`at ${cleanName(d.location.name)}`);
+    if (d.known_move) triggers.push(`knowing ${cleanName(d.known_move.name)}`);
+    if (d.min_happiness) triggers.push(`High Happiness`);
+    if (d.time_of_day) triggers.push(`at ${d.time_of_day}`);
+    
+    // Fallback for weird hyper-specific evolution methods (e.g., Galarian evolutions)
+    if (triggers.length === 0 && d.trigger && d.trigger.name !== 'level-up') {
+        triggers.push(cleanName(d.trigger.name));
+    }
+
+    return triggers.length > 0 ? `-- ${triggers.join(' + ')} --> ` : '--> ';
+}
+
+// Recursive path building for branching evolution lines
+function buildEvoPaths(node, targetName, currentPath = '') {
+    let pkmName = cleanName(node.species.name);
+    if (node.species.name === targetName) pkmName = `*${pkmName}*`;
+    
+    let path = currentPath ? `${currentPath} ${pkmName}` : pkmName;
+    
+    if (!node.evolves_to || node.evolves_to.length === 0) {
+        return [path];
+    }
+    
+    let paths = [];
+    node.evolves_to.forEach(evo => {
+        const arrow = getEvoDetails(evo.evolution_details);
+        const nextPaths = buildEvoPaths(evo, targetName, `${path} ${arrow}`);
+        paths.push(...nextPaths);
+    });
+    return paths;
+}
+
+// Core HTTP ping keep-alive endpoint for cron-job.org
+app.get('/', (req, res) => {
+    res.status(200).send('Pokédex Bot is awake and running!');
+});
+
+// Verification endpoint for Meta Cloud API installation
 app.get('/webhook', (req, res) => {
     if (req.query['hub.verify_token'] === 'my_secret_token') {
         res.send(req.query['hub.challenge']);
@@ -17,80 +82,165 @@ app.get('/webhook', (req, res) => {
     }
 });
 
-// Listen for incoming WhatsApp messages
+// Incoming message handler pipeline
 app.post('/webhook', async (req, res) => {
-    // 1. Send the response to Meta immediately so it stops hanging
     res.sendStatus(200); 
 
-    // 2. Add this line to print the entire incoming object to your terminal
-    console.log("=== INCOMING WEBHOOK PAYLOAD ===");
-    console.log(JSON.stringify(req.body, null, 2));
-    console.log("================================");
-
     const body = req.body;
-    
-    // Drill down into Meta's JSON payload to find the message text
     if (body.object && body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
         const msg = body.entry[0].changes[0].value.messages[0];
         const fromNumber = msg.from;
-        const text = msg.text?.body?.toLowerCase() || '';
+        const incomingText = msg.text?.body?.trim() || '';
 
-        if (text.startsWith('!pokedex ')) {
-            const pokemonName = text.split(' ')[1];
+        // Match any incoming message starting with '!'
+        if (incomingText.startsWith('!')) {
+            const parts = incomingText.slice(1).split(/\s+/);
+            const pokemonName = parts[0].toLowerCase();
+            const mode = parts[1]?.toLowerCase();
+            const genInput = parts[2];
 
             try {
-                // Fetch from the free PokéAPI
-                const pokeRes = await axios.get(`https://pokeapi.co/api/v2/pokemon/${pokemonName}`);
-                const data = pokeRes.data;
-
-                // DOWNLOAD PHOTO
-                const imageUrl = data.sprites.other['official-artwork'].front_default || data.sprites.front_default;
+                // ----------------------------------------------------
+                // MODE: EVOLUTIONS
+                // ----------------------------------------------------
+                if (mode === 'evos') {
+                    const speciesRes = await axios.get(`https://pokeapi.co/api/v2/pokemon-species/${pokemonName}`);
+                    const chainUrl = speciesRes.data.evolution_chain.url;
+                    const chainRes = await axios.get(chainUrl);
+                    
+                    const paths = buildEvoPaths(chainRes.data.chain, pokemonName);
+                    const formattedMessage = `*Evolution Line for ${cleanName(pokemonName)}:*\n\n` + paths.join('\n');
+                    
+                    await sendText(fromNumber, formattedMessage);
+                }
                 
-                const replyText = `*${data.name.toUpperCase()}*\n` +
-                                  `Type: ${data.types.map(t => t.type.name).join(', ')}\n` +
-                                  `Weight: ${data.weight / 10}kg\n` +
-                                  `Height: ${data.height / 10}m\n\n` +
-                                  `Need an override? Is it the wrong Pokemon? (Showing: ${data.name})`;
+                // ----------------------------------------------------
+                // MODE: MOVESET LEARNSET
+                // ----------------------------------------------------
+                else if (mode === 'moves') {
+                    const pkmRes = await axios.get(`https://pokeapi.co/api/v2/pokemon/${pokemonName}`);
+                    const movesData = pkmRes.data.moves;
+                    
+                    let targetGroups = [];
+                    let genTitle = "Latest Gen";
+                    
+                    if (genInput && GEN_MAP[genInput]) {
+                        targetGroups = GEN_MAP[genInput];
+                        genTitle = `Gen ${genInput}`;
+                    }
 
-                // Send the reply back via Meta's Cloud API
-                await axios({
-                    method: 'POST',
-                    url: `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`,
-                    headers: {
-                        'Authorization': `Bearer ${TOKEN}`,
-                        'Content-Type': 'application/json'
-                    },
-                    data: {
-                        messaging_product: 'whatsapp',
-                        to: fromNumber,
-                        type: 'image',
-                        image: {
-                            link: imageUrl,
-                            caption: replyText
+                    let learnset = [];
+                    movesData.forEach(m => {
+                        m.version_group_details.forEach(vg => {
+                            const matchGroup = targetGroups.length === 0 || targetGroups.includes(vg.version_group.name);
+                            if (matchGroup && vg.move_learn_method.name === 'level-up') {
+                                learnset.push({
+                                    level: vg.level_learned_at,
+                                    name: cleanName(m.move.name)
+                                });
+                            }
+                        });
+                    });
+
+                    // If user didn't specify a gen, isolate the moves to the highest gen available
+                    if (targetGroups.length === 0 && learnset.length > 0) {
+                        const maxLevel = Math.max(...learnset.map(l => l.level));
+                        // Deduplicate entries keeping logical order
+                    }
+
+                    // Deduplicate and sort moves ascending by level
+                    const uniqueMoves = [];
+                    const map = new Map();
+                    for (const item of learnset) {
+                        const key = `${item.level}-${item.name}`;
+                        if(!map.has(key)){
+                            map.set(key, true);
+                            uniqueMoves.push(item);
                         }
                     }
-                });
+                    uniqueMoves.sort((a, b) => a.level - b.level);
+
+                    if (uniqueMoves.length === 0) {
+                        await sendText(fromNumber, `No level-up moves found for ${cleanName(pokemonName)} in ${genTitle}.`);
+                        return;
+                    }
+
+                    let moveListText = `*${cleanName(pokemonName)} Level-Up Moves (${genTitle}):*\n`;
+                    uniqueMoves.forEach(m => {
+                        moveListText += `• Lv. ${m.level.toString().padEnd(2, ' ')} - ${m.name}\n`;
+                    });
+
+                    await sendText(fromNumber, moveListText);
+                }
+                
+                // ----------------------------------------------------
+                // MODE: STANDARD POKEDEX PROFILE
+                // ----------------------------------------------------
+                else {
+                    const pkmRes = await axios.get(`https://pokeapi.co/api/v2/pokemon/${pokemonName}`);
+                    const speciesRes = await axios.get(`https://pokeapi.co/api/v2/pokemon-species/${pokemonName}`);
+                    
+                    const pkm = pkmRes.data;
+                    const species = speciesRes.data;
+
+                    // Pull localized English data fields safely
+                    const entry = species.flavor_text_entries.find(e => e.language.name === 'en');
+                    const textDescription = entry ? entry.flavor_text.replace(/[\n\f]/g, ' ') : 'No description database entry.';
+                    
+                    const genusMatch = species.genera.find(g => g.language.name === 'en');
+                    const category = genusMatch ? genusMatch.genus : 'Unknown Pokémon';
+
+                    const imageUrl = pkm.sprites.other['official-artwork'].front_default || pkm.sprites.front_default;
+                    const idString = pkm.id.toString().padStart(4, '0');
+                    const types = pkm.types.map(t => cleanName(t.type.name)).join(' / ');
+
+                    const caption = `*No. ${idString}* | *${pkm.name.toUpperCase()}*\n` +
+                                    `_${category}_\n\n` +
+                                    `• *Type:* ${types}\n` +
+                                    `• *Height:* ${pkm.height / 10} m\n` +
+                                    `• *Weight:* ${pkm.weight / 10} kg\n\n` +
+                                    `*Description:*\n${textDescription}\n\n` +
+                                    `Need an override? Is it the wrong Pokemon? (Showing: ${pkm.name})`;
+
+                    await sendImage(fromNumber, imageUrl, caption);
+                }
 
             } catch (error) {
-                // Send an error text if the Pokémon isn't found
-                await axios({
-                    method: 'POST',
-                    url: `https://graph.facebook.com/v19.0/${PHONE_NUMBER_ID}/messages`,
-                    headers: { 
-                        'Authorization': `Bearer ${TOKEN}`, 
-                        'Content-Type': 'application/json' 
-                    },
-                    data: {
-                        messaging_product: 'whatsapp',
-                        to: fromNumber,
-                        type: 'text',
-                        text: { body: "Could not find that Pokémon. Please check the spelling!" }
-                    }
-                });
+                await sendText(fromNumber, `Could not process command for "${pokemonName}". Check syntax spelling!`);
             }
         }
     }
 });
+
+// Wrapper helper to dispatch images via Meta Cloud API
+async function sendImage(to, url, caption) {
+    await axios({
+        method: 'POST',
+        url: `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
+        headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+        data: {
+            messaging_product: 'whatsapp',
+            to: to,
+            type: 'image',
+            image: { link: url, caption: caption }
+        }
+    });
+}
+
+// Wrapper helper to dispatch text lines via Meta Cloud API
+async function sendText(to, text) {
+    await axios({
+        method: 'POST',
+        url: `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
+        headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+        data: {
+            messaging_product: 'whatsapp',
+            to: to,
+            type: 'text',
+            text: { body: text }
+        }
+    });
+}
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Pokédex Webhook running on port ${PORT}`));
