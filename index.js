@@ -3,6 +3,16 @@ const axios = require('axios');
 const app = express();
 const levenshtein = require('fast-levenshtein');
 
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "YOUR_GEMINI_API_KEY";
+
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+
+const geminiModel = genAI.getGenerativeModel({
+    model: "gemini-2.5-flash"
+});
+
 app.use(express.json());
 
 // You will copy these from the Meta Developer Dashboard
@@ -138,6 +148,31 @@ function buildEvoPaths(node, targetName, currentPath = '') {
         paths.push(...nextPaths);
     });
     return paths;
+}
+
+async function askGemini(userMessage) {
+
+    const prompt =
+        "Answer this question with short answer, as short and simplified as possible, with no extra information as long as the question is answered. Maximum 50 words.\n\nQuestion:\n" +
+        userMessage;
+
+    const result = await geminiModel.generateContent({
+        contents: [
+            {
+                role: "user",
+                parts: [{ text: prompt }]
+            }
+        ],
+        tools: [{
+            googleSearch: {}
+        }],
+        generationConfig: {
+            maxOutputTokens: 100,
+            temperature: 0.3
+        }
+    });
+
+    return result.response.text().trim();
 }
 
 // Core HTTP ping keep-alive endpoint for cron-job.org
@@ -411,6 +446,23 @@ app.post('/webhook', async (req, res) => {
                     `![pkm name] stats - Shows Base Stats + Abilities`;
 
                 await sendText(fromNumber, errortext);
+            }
+        } else {
+
+            try {
+
+                const answer = await askGemini(incomingText);
+
+                await sendText(fromNumber, answer);
+
+            } catch (err) {
+
+                console.error("Gemini Error:", err);
+
+                await sendText(
+                    fromNumber,
+                    "Sorry, I couldn't process that question right now."
+                );
             }
         }
     }
