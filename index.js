@@ -66,6 +66,7 @@ const REGIONAL_FORMS = {
 };
 
 let pokemonNameCache = null;
+const defaultFormCache = new Map();
 
 async function getClosestPokemonName(input) {
     if (!pokemonNameCache) {
@@ -87,6 +88,55 @@ async function getClosestPokemonName(input) {
 
     // Don't suggest completely unrelated names
     return smallestDistance <= 4 ? closest : null;
+}
+
+async function resolvePokemonForm(inputName) {
+
+    try {
+
+        // Direct hit first
+        await axios.get(
+            `https://pokeapi.co/api/v2/pokemon/${inputName}`
+        );
+
+        return inputName;
+
+    } catch {}
+
+    try {
+
+        const speciesRes = await axios.get(
+            `https://pokeapi.co/api/v2/pokemon-species/${inputName}`
+        );
+
+        const varieties = speciesRes.data.varieties;
+
+        const defaultVariety = varieties.find(
+            v => v.is_default
+        );
+
+        if (defaultVariety) {
+            return defaultVariety.pokemon.name;
+        }
+
+        return varieties[0].pokemon.name;
+
+    } catch {
+
+        throw new Error("Pokemon not found");
+
+    }
+}
+
+async function getAllForms(speciesName) {
+
+    const speciesRes = await axios.get(
+        `https://pokeapi.co/api/v2/pokemon-species/${speciesName}`
+    );
+
+    return speciesRes.data.varieties.map(
+        v => v.pokemon.name
+    );
 }
 
 function getBaseSpeciesName(name) {
@@ -224,7 +274,12 @@ app.post('/webhook', async (req, res) => {
         // Match any incoming message starting with '!'
         if (incomingText.startsWith('!')) {
             const parts = incomingText.slice(1).split(/\s+/);
-            const pokemonName = normalizePokemonName(parts[0].toLowerCase());
+            const rawPokemonName = normalizePokemonName(
+                parts[0].toLowerCase()
+            );
+
+            const pokemonName =
+                await resolvePokemonForm(rawPokemonName);
             const mode = parts[1]?.toLowerCase();
             const genInput = parts[2];
 
@@ -409,31 +464,25 @@ app.post('/webhook', async (req, res) => {
                 // MODE: STANDARD POKEDEX PROFILE
                 // ----------------------------------------------------
                 else {
-                    let pkm;
-                    let species;
+                    const pkmRes = await axios.get(`https://pokeapi.co/api/v2/pokemon/${pokemonName}`);
+                    const speciesRes = await axios.get(
+                        `https://pokeapi.co/api/v2/pokemon-species/${getBaseSpeciesName(pokemonName)}`
+                    );
+                    
+                    const pkm = pkmRes.data;
+                    const species = speciesRes.data;
 
-                    try {
-                        // Attempt 1: Try hitting the species endpoint first.
-                        // This resolves base names like "giratina" or "aegislash" to their default forms.
-                        const speciesRes = await axios.get(`https://pokeapi.co/api/v2/pokemon-species/${pokemonName}`);
-                        species = speciesRes.data;
+                    const forms = species.varieties
+                        .map(v => v.pokemon.name);
 
-                        // Find the default variety (e.g., giratina-altered, aegislash-shield)
-                        const defaultVariety = species.varieties.find(v => v.is_default) || species.varieties[0];
-                        
-                        // Fetch the actual stats/sprites using that default form's URL
-                        const pkmRes = await axios.get(defaultVariety.pokemon.url);
-                        pkm = pkmRes.data;
+                    let formsText = "";
 
-                    } catch (err) {
-                        // Attempt 2: If they typed a specific form (e.g., "giratina-origin"), 
-                        // the species endpoint will 404. We catch it and fetch the exact form instead.
-                        const pkmRes = await axios.get(`https://pokeapi.co/api/v2/pokemon/${pokemonName}`);
-                        pkm = pkmRes.data;
+                    if (forms.length > 1) {
 
-                        // Use the species URL hidden inside the form's data to grab the Pokédex descriptions
-                        const speciesRes = await axios.get(pkm.species.url);
-                        species = speciesRes.data;
+                        formsText =
+                            `\n*Forms:*\n` +
+                            forms.join('\n');
+
                     }
 
                     // Pull localized English data fields safely
@@ -444,23 +493,25 @@ app.post('/webhook', async (req, res) => {
                     const category = genusMatch ? genusMatch.genus : 'Unknown Pokémon';
 
                     const imageUrl = pkm.sprites.other['official-artwork'].front_default || pkm.sprites.front_default;
-                    const idString = species.id.toString().padStart(4, '0'); // Use species ID so all forms share the same number
+                    const idString = pkm.id.toString().padStart(4, '0');
                     const types = pkm.types.map(t => cleanName(t.type.name)).join(' / ');
 
-                    // Build the list of all available forms
-                    let formsText = "";
-                    if (species.varieties && species.varieties.length > 1) {
-                        const formNames = species.varieties.map(v => cleanName(v.pokemon.name));
-                        formsText = `\n\n*Available Forms:*\n${formNames.join(', ')}`;
-                    }
+                    const displayName = cleanName(
+                        pkm.name
+                            .replace('-alola', ' (Alolan)')
+                            .replace('-galar', ' (Galarian)')
+                            .replace('-hisui', ' (Hisuian)')
+                            .replace('-paldea', ' (Paldean)')
+                    );
 
-                    const caption = `*No. ${idString}* | *${pkm.name.toUpperCase()}*\n` +
-                                    `_${category}_\n\n` +
-                                    `• *Type:* ${types}\n` +
-                                    `• *Height:* ${pkm.height / 10} m\n` +
-                                    `• *Weight:* ${pkm.weight / 10} kg\n\n` +
-                                    `*Description:*\n${textDescription}${formsText}\n\n` +
-                                    `Need an override? Is it the wrong Pokemon? (Showing: ${pkm.name})\nDOWNLOAD PHOTO`;
+                    const caption =
+                        `*No. ${idString}* | *${displayName.toUpperCase()}*\n` +
+                        `_${category}_\n\n` +
+                        `• *Type:* ${types}\n` +
+                        `• *Height:* ${pkm.height / 10} m\n` +
+                        `• *Weight:* ${pkm.weight / 10} kg\n\n` +
+                        `*Description:*\n${textDescription}\n` +
+                        formsText;
 
                     await sendImage(fromNumber, imageUrl, caption);
                 }
