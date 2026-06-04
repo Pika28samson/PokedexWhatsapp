@@ -101,39 +101,24 @@ async function getClosestPokemonName(input) {
 async function resolvePokemonForm(inputName) {
 
     try {
-
-        // Direct hit first
         await axios.get(
             `https://pokeapi.co/api/v2/pokemon/${inputName}`
         );
 
         return inputName;
-
     } catch {}
 
-    try {
+    const speciesRes = await axios.get(
+        `https://pokeapi.co/api/v2/pokemon-species/${inputName}`
+    );
 
-        const speciesRes = await axios.get(
-            `https://pokeapi.co/api/v2/pokemon-species/${inputName}`
-        );
+    const defaultVariety = speciesRes.data.varieties.find(
+        v => v.is_default
+    );
 
-        const varieties = speciesRes.data.varieties;
-
-        const defaultVariety = varieties.find(
-            v => v.is_default
-        );
-
-        if (defaultVariety) {
-            return defaultVariety.pokemon.name;
-        }
-
-        return varieties[0].pokemon.name;
-
-    } catch {
-
-        throw new Error("Pokemon not found");
-
-    }
+    return defaultVariety
+        ? defaultVariety.pokemon.name
+        : speciesRes.data.varieties[0].pokemon.name;
 }
 
 async function getAllForms(speciesName) {
@@ -286,25 +271,13 @@ app.post('/webhook', async (req, res) => {
                 parts[0].toLowerCase()
             );
 
-            try {
-
-                const pokemonName =
-                    await resolvePokemonForm(rawPokemonName);
-
-                // rest of code
-
-            } catch (error) {
-
-                const suggestion = await getClosestPokemonName(
-                    rawPokemonName
-                );
-
-                // error message
-            }
             const mode = parts[1]?.toLowerCase();
             const genInput = parts[2];
 
             try {
+                const pokemonName =
+                await resolvePokemonForm(rawPokemonName);
+
                 // ----------------------------------------------------
                 // MODE: EVOLUTIONS
                 // ----------------------------------------------------
