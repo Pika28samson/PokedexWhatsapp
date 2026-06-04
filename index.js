@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const app = express();
+const levenshtein = require('fast-levenshtein');
 
 app.use(express.json());
 
@@ -50,6 +51,30 @@ const REGIONAL_FORMS = {
     'h-': 'hisui',
     'p-': 'paldea'
 };
+
+let pokemonNameCache = null;
+
+async function getClosestPokemonName(input) {
+    if (!pokemonNameCache) {
+        const res = await axios.get('https://pokeapi.co/api/v2/pokemon?limit=2000');
+        pokemonNameCache = res.data.results.map(p => p.name);
+    }
+
+    let closest = null;
+    let smallestDistance = Infinity;
+
+    for (const name of pokemonNameCache) {
+        const distance = levenshtein.get(input, name);
+
+        if (distance < smallestDistance) {
+            smallestDistance = distance;
+            closest = name;
+        }
+    }
+
+    // Don't suggest completely unrelated names
+    return smallestDistance <= 4 ? closest : null;
+}
 
 function getBaseSpeciesName(name) {
     return name
@@ -274,6 +299,56 @@ app.post('/webhook', async (req, res) => {
                 }
                 
                 // ----------------------------------------------------
+                // MODE: STATS
+                // ----------------------------------------------------
+                else if (mode === 'stats') {
+
+                    const pkmRes = await axios.get(
+                        `https://pokeapi.co/api/v2/pokemon/${pokemonName}`
+                    );
+
+                    const pkm = pkmRes.data;
+
+                    const statMap = {
+                        hp: 'HP',
+                        attack: 'Attack',
+                        defense: 'Defense',
+                        'special-attack': 'Sp. Attack',
+                        'special-defense': 'Sp. Defense',
+                        speed: 'Speed'
+                    };
+
+                    const stats = pkm.stats
+                        .map(s =>
+                            `${statMap[s.stat.name]}: ${s.base_stat}`
+                        )
+                        .join('\n');
+
+                    const abilities = pkm.abilities
+                        .map(a => {
+                            const name = cleanName(a.ability.name);
+
+                            return a.is_hidden
+                                ? `${name} (Hidden)`
+                                : name;
+                        })
+                        .join('\n');
+
+                    const bst = pkm.stats.reduce(
+                        (sum, stat) => sum + stat.base_stat,
+                        0
+                    );
+
+                    const message =
+                        `*${cleanName(pokemonName)} Base Stats*\n\n` +
+                        `${stats}\n\n` +
+                        `*BST:* ${bst}\n\n` +
+                        `*Abilities:*\n${abilities}`;
+
+                    await sendText(fromNumber, message);
+                }
+
+                // ----------------------------------------------------
                 // MODE: STANDARD POKEDEX PROFILE
                 // ----------------------------------------------------
                 else {
@@ -315,7 +390,27 @@ app.post('/webhook', async (req, res) => {
                 }
 
             } catch (error) {
-                await sendText(fromNumber, `Could not process command for "${pokemonName}". Check syntax spelling!`);
+
+                const suggestion = await getClosestPokemonName(
+                    getBaseSpeciesName(pokemonName)
+                );
+
+                let errortext =
+                    `Could not process command for "${pokemonName}".\n\n`;
+
+                if (suggestion) {
+                    errortext +=
+                        `Did you mean *${cleanName(suggestion)}*?\n\n`;
+                }
+
+                errortext +=
+                    `*List of commands:*\n` +
+                    `![pkm name] - Shows Pokedex Info\n` +
+                    `![pkm name] moves - Shows Moves Learnset\n` +
+                    `![pkm name] evo - Shows Evo Line\n` +
+                    `![pkm name] stats - Shows Base Stats + Abilities`;
+
+                await sendText(fromNumber, errortext);
             }
         }
     }
