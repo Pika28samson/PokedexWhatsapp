@@ -538,7 +538,7 @@ app.post('/webhook', async (req, res) => {
                 );
 
                 let errortext =
-                    `Could not process command for "${msg.text.body}".\n\n`;
+                    `Could not process command:\n*${msg.text.body}*\n\n`;
 
                 let correctedCommand = null;
 
@@ -552,9 +552,9 @@ app.post('/webhook', async (req, res) => {
                             : "");
 
                     errortext +=
-                        `Did you mean *${cleanName(suggestion)}*?\n` +
+                        `Did you mean *${cleanName(suggestion)}*?\n\n` +
                         `Reply to this message to run:\n` +
-                        `${correctedCommand}\n\n`;
+                        `*${correctedCommand}\n\n*`;
                 }
 
                 errortext +=
