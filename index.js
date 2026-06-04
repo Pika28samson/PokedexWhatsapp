@@ -286,8 +286,21 @@ app.post('/webhook', async (req, res) => {
                 parts[0].toLowerCase()
             );
 
-            const pokemonName =
-                await resolvePokemonForm(rawPokemonName);
+            try {
+
+                const pokemonName =
+                    await resolvePokemonForm(rawPokemonName);
+
+                // rest of code
+
+            } catch (error) {
+
+                const suggestion = await getClosestPokemonName(
+                    rawPokemonName
+                );
+
+                // error message
+            }
             const mode = parts[1]?.toLowerCase();
             const genInput = parts[2];
 
@@ -474,14 +487,17 @@ app.post('/webhook', async (req, res) => {
                 // MODE: STANDARD POKEDEX PROFILE
                 // ----------------------------------------------------
                 else {
-                    const pkmRes = await axios.get(`https://pokeapi.co/api/v2/pokemon/${pokemonName}`);
+                    const pkmRes = await axios.get(
+                        `https://pokeapi.co/api/v2/pokemon/${pokemonName}`
+                    );
+
+                    const pkm = pkmRes.data;
+
                     const speciesName = pkm.species.name;
 
                     const speciesRes = await axios.get(
                         `https://pokeapi.co/api/v2/pokemon-species/${speciesName}`
                     );
-                    
-                    const pkm = pkmRes.data;
                     const species = speciesRes.data;
 
                     const forms = species.varieties
@@ -530,10 +546,12 @@ app.post('/webhook', async (req, res) => {
 
             } catch (error) {
 
-                getClosestPokemonName(parts[0].toLowerCase())
+                const suggestion = await getClosestPokemonName(
+                    parts[0].toLowerCase()
+                );
 
                 let errortext =
-                    `Could not process command for "${pokemonName}".\n\n`;
+                    `Could not process command for "${parts[0]}".\n\n`;
 
                 if (suggestion) {
                     errortext +=
