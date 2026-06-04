@@ -5,7 +5,7 @@ const levenshtein = require('fast-levenshtein');
 
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "YOUR_GEMINI_API_KEY";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
@@ -16,8 +16,8 @@ const geminiModel = genAI.getGenerativeModel({
 app.use(express.json());
 
 // You will copy these from the Meta Developer Dashboard
-const TOKEN = 'EAAOZBMSeaZAGEBRjQ9iUvYktGu2eHm7Btt0q4WTVRDFn4WuR1co5i9GU1KrS0CkuOGGhdOxAfjhz3WF8cAr5e4foWl3kr4IBcnhL5VaRWeJPvrwIr7D0dgaE2lerCDaRiRQxwrQ6I4Db2sl4aJZC7VxMUfZCFV12iD7OylkxcRB1FhC3jvjXiWRt5EqcfwZDZD';
-const PHONE_NUMBER_ID = '1114413501761892';
+const TOKEN = process.env.TOKEN;
+const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 
 // Map generations to PokéAPI version groups
 const GEN_MAP = {
