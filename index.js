@@ -10,7 +10,7 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 const geminiModel = genAI.getGenerativeModel({
-    model: "gemini-2.5-flash"
+    model: "gemini-3.1-flash-lite"
 });
 
 console.log("API Key loaded:", !!process.env.GEMINI_API_KEY);
