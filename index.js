@@ -554,7 +554,7 @@ app.post('/webhook', async (req, res) => {
                     errortext +=
                         `Did you mean *${cleanName(suggestion)}*?\n\n` +
                         `Reply to this message to run:\n` +
-                        `*${correctedCommand}\n\n*`;
+                        `*${correctedCommand}*\n\n`;
                 }
 
                 errortext +=
