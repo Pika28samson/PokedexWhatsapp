@@ -67,6 +67,7 @@ const REGIONAL_FORMS = {
 
 let pokemonNameCache = null;
 const defaultFormCache = new Map();
+const suggestionReplies = new Map();
 
 async function getSpeciesName(pokemonName) {
     const pkmRes = await axios.get(
@@ -262,7 +263,20 @@ app.post('/webhook', async (req, res) => {
     if (body.object && body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]) {
         const msg = body.entry[0].changes[0].value.messages[0];
         const fromNumber = msg.from;
-        const incomingText = msg.text?.body?.trim() || '';
+
+        let incomingText = msg.text?.body?.trim() || '';
+
+        if (
+            msg.context?.id &&
+            suggestionReplies.has(msg.context.id)
+        ) {
+
+            incomingText =
+                suggestionReplies.get(msg.context.id);
+
+            suggestionReplies.delete(msg.context.id);
+        }
+
 
         // Match any incoming message starting with '!'
         if (incomingText.startsWith('!')) {
@@ -524,11 +538,23 @@ app.post('/webhook', async (req, res) => {
                 );
 
                 let errortext =
-                    `Could not process command for "${parts[0]}".\n\n`;
+                    `Could not process command for "${msg.text.body}".\n\n`;
+
+                let correctedCommand = null;
 
                 if (suggestion) {
+
+                    correctedCommand =
+                        "!" +
+                        suggestion +
+                        (parts.length > 1
+                            ? " " + parts.slice(1).join(" ")
+                            : "");
+
                     errortext +=
-                        `Did you mean *${cleanName(suggestion)}*?\n\n`;
+                        `Did you mean *${cleanName(suggestion)}*?\n` +
+                        `Reply to this message to run:\n` +
+                        `${correctedCommand}\n\n`;
                 }
 
                 errortext +=
@@ -538,7 +564,20 @@ app.post('/webhook', async (req, res) => {
                     `![pkm name] evo - Shows Evo Line\n` +
                     `![pkm name] stats - Shows Base Stats + Abilities`;
 
-                await sendText(fromNumber, errortext);
+                const sentMessage = await sendText(
+                    fromNumber,
+                    errortext
+                );
+
+                if (
+                    correctedCommand &&
+                    sentMessage?.messages?.[0]?.id
+                ) {
+                    suggestionReplies.set(
+                        sentMessage.messages[0].id,
+                        correctedCommand
+                    );
+                }
             }
         } else {
 
@@ -580,10 +619,14 @@ async function sendImage(to, url, caption) {
 
 // Wrapper helper to dispatch text lines via Meta Cloud API
 async function sendText(to, text) {
-    await axios({
+
+    const response = await axios({
         method: 'POST',
         url: `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
-        headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+        headers: {
+            'Authorization': `Bearer ${TOKEN}`,
+            'Content-Type': 'application/json'
+        },
         data: {
             messaging_product: 'whatsapp',
             to: to,
@@ -591,6 +634,8 @@ async function sendText(to, text) {
             text: { body: text }
         }
     });
+
+    return response.data;
 }
 
 const PORT = process.env.PORT || 3000;
