@@ -163,9 +163,9 @@ async function askGemini(userMessage) {
                 parts: [{ text: prompt }]
             }
         ],
-        tools: [{
-            googleSearch: {}
-        }],
+        // tools: [{
+        //     googleSearch: {}
+        // }],
         generationConfig: {
             maxOutputTokens: 100,
             temperature: 0.3
