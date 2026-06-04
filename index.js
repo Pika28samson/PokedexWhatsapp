@@ -163,9 +163,9 @@ async function askGemini(userMessage) {
                 parts: [{ text: prompt }]
             }
         ],
-        // tools: [{
-        //     googleSearch: {}
-        // }],
+        tools: [{
+            googleSearch: {}
+        }],
         generationConfig: {
             maxOutputTokens: 100,
             temperature: 0.3
@@ -457,7 +457,9 @@ app.post('/webhook', async (req, res) => {
 
             } catch (err) {
 
-                console.error("Gemini Error:", err);
+                console.error("Gemini Error:");
+                console.error(JSON.stringify(err, null, 2));
+                console.error(err);
 
                 await sendText(
                     fromNumber,
