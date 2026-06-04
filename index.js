@@ -193,8 +193,6 @@ app.get('/gemini-test', async (req, res) => {
     }
 });
 
-const axios = require('axios');
-
 app.get('/whereami', async (req, res) => {
     try {
         const r = await axios.get('https://ipinfo.io/json');
