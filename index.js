@@ -13,6 +13,9 @@ const geminiModel = genAI.getGenerativeModel({
     model: "gemini-2.5-flash"
 });
 
+console.log("API Key loaded:", !!process.env.GEMINI_API_KEY);
+console.log("API Key prefix:", process.env.GEMINI_API_KEY?.slice(0, 10));
+
 app.use(express.json());
 
 // You will copy these from the Meta Developer Dashboard
@@ -178,6 +181,27 @@ async function askGemini(userMessage) {
 // Core HTTP ping keep-alive endpoint for cron-job.org
 app.get('/', (req, res) => {
     res.status(200).send('Pokédex Bot is awake and running!');
+});
+
+app.get('/gemini-test', async (req, res) => {
+    try {
+        const result = await geminiModel.generateContent("Reply with TEST");
+        res.send(result.response.text());
+    } catch (err) {
+        console.error(err);
+        res.status(500).send(err.message);
+    }
+});
+
+const axios = require('axios');
+
+app.get('/whereami', async (req, res) => {
+    try {
+        const r = await axios.get('https://ipinfo.io/json');
+        res.json(r.data);
+    } catch (e) {
+        res.send(e.message);
+    }
 });
 
 // Verification endpoint for Meta Cloud API installation
