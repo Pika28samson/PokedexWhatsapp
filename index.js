@@ -68,6 +68,14 @@ const REGIONAL_FORMS = {
 let pokemonNameCache = null;
 const defaultFormCache = new Map();
 
+async function getSpeciesName(pokemonName) {
+    const pkmRes = await axios.get(
+        `https://pokeapi.co/api/v2/pokemon/${pokemonName}`
+    );
+
+    return pkmRes.data.species.name;
+}
+
 async function getClosestPokemonName(input) {
     if (!pokemonNameCache) {
         const res = await axios.get('https://pokeapi.co/api/v2/pokemon?limit=2000');
@@ -288,8 +296,10 @@ app.post('/webhook', async (req, res) => {
                 // MODE: EVOLUTIONS
                 // ----------------------------------------------------
                 if (mode === 'evo') {
+                    const speciesName = await getSpeciesName(pokemonName);
+
                     const speciesRes = await axios.get(
-                        `https://pokeapi.co/api/v2/pokemon-species/${getBaseSpeciesName(pokemonName)}`
+                        `https://pokeapi.co/api/v2/pokemon-species/${speciesName}`
                     );
                     const chainUrl = speciesRes.data.evolution_chain.url;
                     const chainRes = await axios.get(chainUrl);
@@ -465,8 +475,10 @@ app.post('/webhook', async (req, res) => {
                 // ----------------------------------------------------
                 else {
                     const pkmRes = await axios.get(`https://pokeapi.co/api/v2/pokemon/${pokemonName}`);
+                    const speciesName = pkm.species.name;
+
                     const speciesRes = await axios.get(
-                        `https://pokeapi.co/api/v2/pokemon-species/${getBaseSpeciesName(pokemonName)}`
+                        `https://pokeapi.co/api/v2/pokemon-species/${speciesName}`
                     );
                     
                     const pkm = pkmRes.data;
@@ -518,9 +530,7 @@ app.post('/webhook', async (req, res) => {
 
             } catch (error) {
 
-                const suggestion = await getClosestPokemonName(
-                    getBaseSpeciesName(pokemonName)
-                );
+                getClosestPokemonName(parts[0].toLowerCase())
 
                 let errortext =
                     `Could not process command for "${pokemonName}".\n\n`;
